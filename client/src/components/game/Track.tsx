@@ -35,8 +35,20 @@ export function Track() {
     const railData: { point: THREE.Vector3; tilt: number; tangent: THREE.Vector3; normal: THREE.Vector3 }[] = [];
     const numSamples = Math.max(trackPoints.length * 20, 100);
     
-    // Transport UP vector instead of normal - keeps frame gravity-anchored
-    let prevUp = new THREE.Vector3(0, 1, 0);
+    // True parallel transport using quaternion rotation between successive tangents
+    let prevTangent = curve.getTangent(0).normalize();
+    
+    // Initialize up vector perpendicular to first tangent, biased toward world up
+    const worldUp = new THREE.Vector3(0, 1, 0);
+    let prevUp = worldUp.clone();
+    const initDot = prevUp.dot(prevTangent);
+    prevUp.sub(prevTangent.clone().multiplyScalar(initDot));
+    if (prevUp.length() < 0.01) {
+      prevUp.set(1, 0, 0);
+      const d = prevUp.dot(prevTangent);
+      prevUp.sub(prevTangent.clone().multiplyScalar(d));
+    }
+    prevUp.normalize();
     
     for (let i = 0; i <= numSamples; i++) {
       const t = i / numSamples;
@@ -44,29 +56,43 @@ export function Track() {
       const tangent = curve.getTangent(t).normalize();
       const tilt = interpolateTilt(trackPoints, t, isLooped);
       
-      // Project world up onto plane perpendicular to tangent
-      const worldUp = new THREE.Vector3(0, 1, 0);
-      const dot = worldUp.dot(tangent);
-      const projectedUp = worldUp.clone().sub(tangent.clone().multiplyScalar(dot));
-      
       let up: THREE.Vector3;
-      if (projectedUp.length() > 0.1) {
-        // Normal case: use projected world up
-        up = projectedUp.normalize();
+      
+      if (i === 0) {
+        up = prevUp.clone();
       } else {
-        // Degenerate case (tangent is vertical): use previous up transported
-        const prevDot = prevUp.dot(tangent);
-        up = prevUp.clone().sub(tangent.clone().multiplyScalar(prevDot));
+        // Compute quaternion that rotates prevTangent to current tangent
+        const dotT = Math.max(-1, Math.min(1, prevTangent.dot(tangent)));
+        
+        if (dotT > 0.9999) {
+          // Tangents nearly identical, no rotation needed
+          up = prevUp.clone();
+        } else if (dotT < -0.9999) {
+          // Tangents opposite (180° turn) - rotate around up
+          up = prevUp.clone().negate();
+        } else {
+          // Compute rotation axis and angle
+          const axis = new THREE.Vector3().crossVectors(prevTangent, tangent).normalize();
+          const angle = Math.acos(dotT);
+          
+          // Create quaternion for this rotation
+          const quat = new THREE.Quaternion().setFromAxisAngle(axis, angle);
+          
+          // Rotate previous up by this quaternion
+          up = prevUp.clone().applyQuaternion(quat);
+        }
+        
+        // Orthonormalize: ensure up is perpendicular to tangent
+        const upDot = up.dot(tangent);
+        up.sub(tangent.clone().multiplyScalar(upDot));
         if (up.length() > 0.01) {
           up.normalize();
         } else {
-          // Fallback: use a consistent side vector
-          up.set(1, 0, 0);
-          const d = up.dot(tangent);
-          up.sub(tangent.clone().multiplyScalar(d)).normalize();
+          up = prevUp.clone();
         }
       }
       
+      prevTangent.copy(tangent);
       prevUp.copy(up);
       
       // Derive normal (sideways) from tangent × up

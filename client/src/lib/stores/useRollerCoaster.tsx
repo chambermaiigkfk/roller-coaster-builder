@@ -153,7 +153,8 @@ export const useRollerCoaster = create<RollerCoasterState>((set, get) => ({
       }
       
       // Build descending half - IDENTICAL mirror of ascending (no lateral offset)
-      for (let i = halfPoints - 1; i >= 1; i--) {
+      // Go all the way to i=0 to close the loop properly at θ=2π
+      for (let i = halfPoints - 1; i >= 0; i--) {
         const mirrorT = (halfPoints - i) / halfPoints;
         const theta = Math.PI + mirrorT * Math.PI;
         
@@ -180,10 +181,13 @@ export const useRollerCoaster = create<RollerCoasterState>((set, get) => ({
       // Compute right vector for separation in transition
       const up = new THREE.Vector3(0, 1, 0);
       const right = new THREE.Vector3().crossVectors(forward, up).normalize();
-      const exitSeparation = 2.5;
+      const exitSeparation = 3.0;
+      const forwardSeparation = 2.0; // Also push exit forward to prevent intersection
       
-      // Offset the loop exit laterally to start the separation
-      const offsetLoopExit = loopExit.clone().add(right.clone().multiplyScalar(exitSeparation * 0.5));
+      // Offset the loop exit both forward and laterally to clear the entry track
+      const offsetLoopExit = loopExit.clone()
+        .add(forward.clone().multiplyScalar(forwardSeparation))
+        .add(right.clone().multiplyScalar(exitSeparation));
       
       // Create smooth transition points using cubic Hermite interpolation
       const transitionPoints: TrackPoint[] = [];

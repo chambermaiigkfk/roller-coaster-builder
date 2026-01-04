@@ -194,19 +194,25 @@ export const useRollerCoaster = create<RollerCoasterState>((set, get) => ({
         .add(forward.clone().multiplyScalar(forwardSeparation))
         .add(right.clone().multiplyScalar(exitSeparation));
       
-      // Smooth transition that eases out the lateral offset progressively
+      // Smooth transition anchored to loopExit with proper easing
       const transitionPoints: TrackPoint[] = [];
-      const forwardStride = 4; // Distance forward per transition point
+      const totalForwardDist = 10; // Total distance to travel forward
       
-      // Transition points that progressively reduce lateral offset to 0
-      // Using easeOutQuad: (1-s)^2 for lateral, linear for forward
-      const transitionSteps = [0.25, 0.55, 0.85];
+      // EaseOutCubic for lateral: (1-s)^3 - gentler curve
+      // EaseInOutCubic for forward: smooth acceleration/deceleration
+      const easeOutCubic = (s: number) => 1 - Math.pow(1 - s, 3);
+      const easeInOutCubic = (s: number) => s < 0.5 
+        ? 4 * s * s * s 
+        : 1 - Math.pow(-2 * s + 2, 3) / 2;
+      
+      // Transition points at even intervals, all anchored to loopExit
+      const transitionSteps = [0.25, 0.5, 0.75, 1.0];
       
       for (const s of transitionSteps) {
-        const forwardDist = forwardStride * (1 + s * 2); // Accelerating forward
-        const lateralRemaining = helixSeparation * Math.pow(1 - s, 2); // Easing out lateral
+        const forwardDist = totalForwardDist * easeInOutCubic(s);
+        const lateralRemaining = helixSeparation * (1 - easeOutCubic(s));
         
-        const transPoint = entryPos.clone()
+        const transPoint = loopExit.clone()
           .add(forward.clone().multiplyScalar(forwardDist))
           .add(right.clone().multiplyScalar(lateralRemaining));
         
@@ -221,11 +227,18 @@ export const useRollerCoaster = create<RollerCoasterState>((set, get) => ({
         const nextPos = nextPoint.position.clone();
         const lastTransition = transitionPoints[transitionPoints.length - 1].position;
         
-        // Final blend point toward next point
-        const blendPoint = lastTransition.clone().lerp(nextPos, 0.5);
+        // Blend points toward next point - two points for smoother curve
+        const blend1 = lastTransition.clone().lerp(nextPos, 0.33);
+        const blend2 = lastTransition.clone().lerp(nextPos, 0.66);
+        
         transitionPoints.push({
           id: `point-${++pointCounter}`,
-          position: blendPoint,
+          position: blend1,
+          tilt: 0
+        });
+        transitionPoints.push({
+          id: `point-${++pointCounter}`,
+          position: blend2,
           tilt: 0
         });
       }

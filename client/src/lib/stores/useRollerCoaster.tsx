@@ -242,41 +242,23 @@ export const useRollerCoaster = create<RollerCoasterState>((set, get) => ({
         });
       }
       
-      // Get the next point (unchanged) so we can rejoin it
+      // Get the next point so we can rejoin it
       const nextPoint = state.trackPoints[pointIndex + 1];
       
-      // Loop exit position (last point of loop) - same as entry position
+      // Loop exit position (last point of loop)
       const loopExit = loopPoints[loopPoints.length - 1].position.clone();
       
-      // Use same right vector from loop generation for transition separation
-      const exitSeparation = EXIT_SEPARATION;
-      const forwardSeparation = FORWARD_SEPARATION;
+      // === EXIT: Simply connect loop exit to the original legacy track ===
+      // No lateral offset, no moving legacy points - just let the spline naturally curve back
+      // The loop already ends offset laterally due to helix; the spline will smoothly rejoin
       
-      // Offset the loop exit both forward and laterally to clear the entry track
-      const offsetLoopExit = loopExit.clone()
-        .add(forward.clone().multiplyScalar(forwardSeparation))
-        .add(right.clone().multiplyScalar(exitSeparation));
-      
-      // === EXIT: Move the next legacy point horizontally to meet the loop exit ===
-      // No extra transition points - just move the legacy point's X/Z to match offsetLoopExit
-      const adjustedNextPoint: TrackPoint = {
-        ...nextPoint,
-        id: `point-${++pointCounter}`,
-        position: new THREE.Vector3(
-          offsetLoopExit.x,
-          nextPoint.position.y,
-          offsetLoopExit.z
-        )
-      };
-      
-      // Combine: all before entry + approach + entry + loop + adjusted legacy point + rest
+      // Combine: all before entry + approach + entry + loop + original legacy points (unchanged)
       const newTrackPoints = [
         ...state.trackPoints.slice(0, pointIndex), // All points before entry
         ...approachPoints,                          // Smooth approach to entry
         entryPoint,                                 // The entry point itself
-        ...loopPoints,                              // The loop
-        adjustedNextPoint,                          // Legacy point moved to meet loop exit
-        ...state.trackPoints.slice(pointIndex + 2) // Skip original entry point and next point
+        ...loopPoints,                              // The loop (exits at helix offset)
+        ...state.trackPoints.slice(pointIndex + 1) // Keep all legacy points as-is
       ];
       
       return { trackPoints: newTrackPoints };

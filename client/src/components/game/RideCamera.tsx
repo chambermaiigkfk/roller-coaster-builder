@@ -12,6 +12,8 @@ export function RideCamera() {
   const previousCameraPos = useRef(new THREE.Vector3());
   const previousLookAt = useRef(new THREE.Vector3());
   const maxHeightReached = useRef(0);
+  const transportedUp = useRef(new THREE.Vector3(0, 1, 0));
+  const lastProgress = useRef(0);
   
   const firstPeakT = useMemo(() => {
     if (trackPoints.length < 2) return 0;
@@ -52,6 +54,9 @@ export function RideCamera() {
     if (isRiding && curveRef.current) {
       const startPoint = curveRef.current.getPoint(0);
       maxHeightReached.current = startPoint.y;
+      // Reset parallel transport up vector for new ride
+      transportedUp.current.set(0, 1, 0);
+      lastProgress.current = 0;
     }
   }, [isRiding]);
   
@@ -103,28 +108,39 @@ export function RideCamera() {
     const position = curve.getPoint(newProgress);
     const tangent = curve.getTangent(newProgress).normalize();
     
-    // Calculate up vector from tangent and world up (no parallel transport drift)
-    const worldUp = new THREE.Vector3(0, 1, 0);
+    // Use parallel transport to maintain up vector through loops
+    // This ensures camera stays INSIDE loops rather than jumping outside
+    const prevTangent = curve.getTangent(lastProgress.current).normalize();
     
-    // Get right vector by crossing tangent with world up
-    let right = new THREE.Vector3().crossVectors(tangent, worldUp);
+    // Calculate rotation from previous tangent to current tangent
+    const rotationAxis = new THREE.Vector3().crossVectors(prevTangent, tangent);
+    const rotationAngle = Math.acos(Math.min(1, Math.max(-1, prevTangent.dot(tangent))));
     
-    // Handle vertical sections where tangent is parallel to world up
-    if (right.lengthSq() < 0.001) {
-      // Use previous right direction as fallback
-      right.set(1, 0, 0);
+    // Only rotate if there's significant change
+    if (rotationAxis.lengthSq() > 0.0001 && rotationAngle > 0.0001) {
+      rotationAxis.normalize();
+      // Rotate the transported up vector by the same rotation that took us from prevTangent to tangent
+      transportedUp.current.applyAxisAngle(rotationAxis, rotationAngle);
     }
-    right.normalize();
     
-    // Calculate base up vector perpendicular to tangent
-    const baseUp = new THREE.Vector3().crossVectors(right, tangent).normalize();
+    // Re-orthogonalize to prevent drift
+    const dot = transportedUp.current.dot(tangent);
+    transportedUp.current.sub(tangent.clone().multiplyScalar(dot));
+    if (transportedUp.current.lengthSq() > 0.0001) {
+      transportedUp.current.normalize();
+    } else {
+      // Fallback if degenerate
+      transportedUp.current.set(0, 1, 0);
+      const d2 = transportedUp.current.dot(tangent);
+      transportedUp.current.sub(tangent.clone().multiplyScalar(d2)).normalize();
+    }
+    
+    lastProgress.current = newProgress;
     
     // Apply track tilt rotation around tangent axis
     const tilt = getTrackTiltAtProgress(trackPoints, newProgress, isLooped);
     const tiltRad = (tilt * Math.PI) / 180;
-    
-    // Rotate baseUp around tangent by tilt angle
-    const upVector = baseUp.clone().applyAxisAngle(tangent, tiltRad);
+    const upVector = transportedUp.current.clone().applyAxisAngle(tangent, tiltRad);
     
     // Camera positioned directly on track with small height offset
     const cameraHeight = 1.5;
